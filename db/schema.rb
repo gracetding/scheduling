@@ -10,10 +10,11 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_05_06_182043) do
+ActiveRecord::Schema[8.0].define(version: 2025_05_07_165943) do
   create_table "requests", force: :cascade do |t|
     t.string "course_name", null: false
     t.integer "student_id", null: false
+    t.integer "priority", null: false
   end
 
   create_table "section_timeslots", force: :cascade do |t|
@@ -29,7 +30,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_05_06_182043) do
   create_table "student_sections", force: :cascade do |t|
     t.integer "student_id", null: false
     t.integer "section_id", null: false
-    t.integer "timeslot_id", null: false
+    t.integer "timeslot_id"
   end
 
   create_table "students", force: :cascade do |t|
