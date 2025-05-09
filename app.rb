@@ -39,40 +39,63 @@ puts "finished making single-section courses"
 # end
 
 # puts "finished making requests"
-single_section_list.each do |course| #schedules people with single-section courses
-    sect = Section.find_by(name: course) #goes by courses
-    Request.where(course_name: course, priority: 1).each do |req|
-        assign = StudentSection.create(student_id: req.student_id, section_id: sect.id)
-        ts = SectionTimeslot.find_by(course_id: sect.id)
-        if ts != nil
-            assign.update(timeslot_id: ts.timeslot_id)
-        end
+# single_section_list.each do |course| #schedules people with single-section courses
+#     sect = Section.find_by(name: course) #goes by courses
+#     Request.where(course_name: course, priority: 1).each do |req|
+#         assign = StudentSection.create(student_id: req.student_id, section_id: sect.id)
+#         # ts = SectionTimeslot.find_by(course_id: sect.id)
+#         # if ts != nil
+#         #     assign.update(timeslot_id: ts.timeslot_id)
+#         # end
         
+#     end
+# end
+
+Request.where(priority: 1).order(:course_name).each do |req|
+    puts req.course_name
+    sect = Section.find_by(name: req.course_name, section_num: 1)
+    if StudentSection.where(section_id: sect.id).count < 20
+        assign = StudentSection.create(student_id: req.student_id, section_id: sect.id)
+
+    else
+        print("class overflow")
+        sect = Section.find_or_create_by(name: req.course_name, section_num: 2)
+        assign = StudentSection.create(student_id: req.student_id, section_id: sect.id)
     end
+    
+
 end
 
-doc = File.new("assignments.txt", "w")
 
-StudentSection.select(:section_id).distinct.each do |assignment| #prints everyone it's scheduled
-    # puts "printing assignments"
-    classname = Section.find_by(id: assignment.section_id)
-    doc.print(classname.name + " ")
-    if SectionTimeslot.find_by(course_id: classname.id) != nil
-        time = Timeslot.find_by(id: SectionTimeslot.find_by(course_id: classname.id).timeslot_id)
+class_list = File.new("all_classes.txt", "w")
+Section.all.each do |sect|
+    class_list.print(sect.name + ", section num. " + sect.section_num)
 
-        doc.print(time.period) 
-    end
-    if StudentSection.where(section_id: assignment.section_id).count > 20
-        doc.print("\n**This should probably be two sections**")
-    end
-    StudentSection.where(section_id: assignment.section_id).each do |stu|
-        student = Student.find_by(id: stu.student_id)
-        doc.print("\n" + student.name)
-    end
-    doc.print("\n\n")
 end
-puts "done writing!"
+class_list.close 
 
-doc.close
+# doc = File.new("assignments.txt", "w")
+
+# StudentSection.select(:section_id).distinct.each do |assignment| #prints everyone it's scheduled
+#     # puts "printing assignments"
+#     classname = Section.find_by(id: assignment.section_id)
+#     doc.print(classname.name + " " + classname.section_num.to_s)
+#     if SectionTimeslot.find_by(course_id: classname.id) != nil
+#         time = Timeslot.find_by(id: SectionTimeslot.find_by(course_id: classname.id).timeslot_id)
+
+#         doc.print(time.period) 
+#     end
+#     if StudentSection.where(section_id: assignment.section_id).count > 20
+#         doc.print("\n**This should probably be two sections**")
+#     end
+#     StudentSection.where(section_id: assignment.section_id).each do |stu|
+#         student = Student.find_by(id: stu.student_id)
+#         doc.print("\n" + student.name)
+#     end
+#     doc.print("\n\n")
+# end
+# puts "done writing!"
+
+# doc.close
 
 

@@ -15,6 +15,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_05_07_165943) do
     t.string "course_name", null: false
     t.integer "student_id", null: false
     t.integer "priority", null: false
+    t.boolean "fulfilled", default: false
   end
 
   create_table "section_timeslots", force: :cascade do |t|

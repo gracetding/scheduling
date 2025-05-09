@@ -4,6 +4,7 @@ class CreateRequestsTable < ActiveRecord::Migration[8.0]
       t.string :course_name, :null => false
       t.integer :student_id, :null => false
       t.integer :priority, :null => false
+      t.boolean :fulfilled, :default => false
     end
   end
 end
