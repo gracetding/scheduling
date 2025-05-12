@@ -3,36 +3,39 @@ from ortools.sat.python import cp_model
 
 # Load course requests spreadsheet
 df = pd.read_excel("py/CourseReqsParsed1.xlsx")  # Assumes columns: Student, Course, Priority
-
-# Example of required period constraints (can come from a config or spreadsheet)
-# Format: {'CourseName_SectionID': required_period (int)}
-required_periods = {
-    'Multivar Calc_1': 1,
-    'Chorus_1': 9,
-    'US String Orchestra_1': 2,
-    'US Winds_1': 2
-}
+secs = pd.read_excel("py/CourseReqsParsed1.xlsx", sheet_name="Classes")
 
 # Configuration
-NUM_PERIODS = 9  # Number of available periods in the day
-MAX_STUDENTS_PER_SECTION = 25
-SECTIONS_PER_COURSE = 2  # Allow up to N sections per course
+required_periods = { # Format: {'CourseName_SectionID': required_period (int)}
+    'Multivar Calc_0': 0,
+    'Chorus_0': 8,
+    'US String Orchestra_0': 1,
+    'US Winds_0': 1
+}
+NUM_PERIODS = 9  # number of timeslots
+MAX_STUDENTS_PER_SECTION = 20
+SECTIONS_PER_COURSE = {}
+for _, row in secs.iterrows():
+    course = row['Name']
+    sections = row["# Sections"]
+    SECTIONS_PER_COURSE[course] = int(sections)
+    #could add in the required periods thing here
 
-# Step 1: Extract unique students and courses
+
+# get unique students and course lists
 students = df['Student'].unique().tolist()
 courses = df['Course'].unique().tolist()
 
-# Step 2: Build student-course request map (with priorities)
+# build student-course request map (with priorities)
 student_course_map = {}
 priority_map = {}
 for _, row in df.iterrows():
     student = row['Student']
     course = row['Course']
     priority = row.get('Priority', 1)
-    student_course_map.setdefault(student, []).append(course)
+    student_course_map.setdefault(student, []).append(course) #if the course reqs list exists, appends the course; if not, makes a list & appends course
     priority_map[(student, course)] = priority
-
-# Step 3: Initialize the model
+# initialize model
 model = cp_model.CpModel()
 
 # Variables
@@ -40,14 +43,14 @@ student_course_section_period = {}  # (student, course, section, period) => bool
 course_section_period = {}          # (course, section, period) => bool
 
 for course in courses:
-    for section in range(SECTIONS_PER_COURSE):
+    for section in range(SECTIONS_PER_COURSE[course]):
         for period in range(NUM_PERIODS):
             key = (course, section, period)
-            course_section_period[key] = model.NewBoolVar(f"course_{course}_sec{section}_p{period}")
+            course_section_period[key] = model.NewBoolVar(f"course_{course}_sec{section}_p{period}") #value is 1 if the section is scheduled in that period
 
 for student in students:
     for course in student_course_map[student]:
-        for section in range(SECTIONS_PER_COURSE):
+        for section in range(SECTIONS_PER_COURSE[course]):
             for period in range(NUM_PERIODS):
                 key = (student, course, section, period)
                 student_course_section_period[key] = model.NewBoolVar(f"{student}_{course}_sec{section}_p{period}")
@@ -56,7 +59,7 @@ for student in students:
 
 # 1. Each section must be scheduled in exactly one period (unless required)
 for course in courses:
-    for section in range(SECTIONS_PER_COURSE):
+    for section in range(SECTIONS_PER_COURSE[course]):
         if f"{course}_{section}" in required_periods:
             for p in range(NUM_PERIODS):
                 if p == required_periods[f"{course}_{section}"]:
@@ -71,10 +74,10 @@ for student in students:
     for course in student_course_map[student]:
         model.Add(sum(
             student_course_section_period[(student, course, section, p)]
-            for section in range(SECTIONS_PER_COURSE)
+            for section in range(SECTIONS_PER_COURSE[course])
             for p in range(NUM_PERIODS)
         ) <= 1)
-        for section in range(SECTIONS_PER_COURSE):
+        for section in range(SECTIONS_PER_COURSE[course]):
             for p in range(NUM_PERIODS):
                 # Students can only be assigned if the section is scheduled then
                 model.AddImplication(
@@ -88,12 +91,12 @@ for student in students:
         model.Add(sum(
             student_course_section_period[(student, course, section, p)]
             for course in student_course_map[student]
-            for section in range(SECTIONS_PER_COURSE)
+            for section in range(SECTIONS_PER_COURSE[course])
         ) <= 1)
 
 # 4. Enforce max students per section per period
 for course in courses:
-    for section in range(SECTIONS_PER_COURSE):
+    for section in range(SECTIONS_PER_COURSE[course]):
         for p in range(NUM_PERIODS):
             enrolled = [
                 student_course_section_period[(s, course, section, p)]
@@ -104,8 +107,9 @@ for course in courses:
 
 # Step 5: Objective — weighted priority-based scheduling
 model.Maximize(sum(
-    student_course_section_period[(student, course, section, p)] * priority_map.get((student, course), 1)
-    for (student, course, section, p) in student_course_section_period
+    student_course_section_period[(student, course, section, period)]
+    for (student, course, section, period), var in student_course_section_period.items()
+    if priority_map.get((student, course), 1) == 1
 ))
 
 # Step 6: Solve
