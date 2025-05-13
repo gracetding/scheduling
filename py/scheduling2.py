@@ -40,6 +40,7 @@ for _, row in secs.iterrows():
 
 student_course_map = {}
 priority_map = {}
+course_weight_map = {}
 for _, row in df.iterrows():
     student = row['Student']
     course = row['Course']
@@ -47,16 +48,17 @@ for _, row in df.iterrows():
     # print(student + course + str(priority))
     student_course_map.setdefault(student, []).append(course) #if the course reqs list exists, appends the course; if not, makes a list & appends course
     priority_map[(student, course)] = priority
+    course_weight_map[course] = float(row["Weight"])
 
 print(student_course_map['Ding, Grace'])
 # eliminate nested classes -- STAR add way to actually handle this later....
-for student in students:
-    if "Multivar Calc" in student_course_map[student] and "Chamber Singers" in student_course_map[student]:
-        student_course_map[student].remove("Chamber Singers")
-    if "US Chamber Orch" in student_course_map[student] and "US String Orch" in student_course_map[student]:
-        student_course_map[student].remove("US String Orch")
-    if "Swing Choir" in student_course_map[student] and "US Chorus" in student_course_map[student]:
-        student_course_map[student].remove("US Chorus")
+# for student in students:
+#     if "Multivar Calc" in student_course_map[student] and "Chamber Singers" in student_course_map[student]:
+#         student_course_map[student].remove("Chamber Singers")
+#     if "US Chamber Orch" in student_course_map[student] and "US String Orch" in student_course_map[student]:
+#         student_course_map[student].remove("US String Orch")
+#     if "Swing Choir" in student_course_map[student] and "US Chorus" in student_course_map[student]:
+#         student_course_map[student].remove("US Chorus")
 
 
 # initialize model
@@ -99,6 +101,7 @@ for course in courses:
 for student in students:
     if 'Multivar Calc' in student_course_map[student]:
         model.Add(stu_course_sec_period[(student, 'Multivar Calc', 0, 0)] == 1)
+    #can probably find a way to generalize these next four
     if 'Chamber Singers' in student_course_map[student]:
         model.Add(stu_course_sec_period[(student, 'Chamber Singers', 0, 0)] == 1)
     if 'US Chamber Orch' in student_course_map[student]:
@@ -107,15 +110,32 @@ for student in students:
         model.Add(stu_course_sec_period[(student, 'US String Orch', 0, 1)] == 1)
     if 'Swing Choir' in student_course_map[student]:
         model.Add(stu_course_sec_period[(student, 'Swing Choir', 0, 8)] == 1)
+    # end edit section
+    # Student must be scheduled in their requested language course
+    if any("WL" in sub[0:3] for sub in student_course_map[student]):
+        wlcourse = [course for course in student_course_map[student] if "WL" in course[0:3]]
+        model.Add(sum(stu_course_sec_period[(student, course, sec, period)]
+                  for course in wlcourse
+                  for sec in range(SECTIONS_PER_COURSE[course])
+                  for period in range(NUM_PERIODS)
+                  ) == 1)
 
-#students can be in more than one class at once -- revisit ways to make them half a course maybe?
-for student in students:
-    for p in range(NUM_PERIODS):
-        model.Add(sum(
-            stu_course_sec_period[(student, course, section, p)]
-            for course in student_course_map[student]
-            for section in range(SECTIONS_PER_COURSE[course])
-        ) <= 1)
+#students can be in more than one class at once -- STAR need to figure out how to sum weights to <= 1
+# for student in students:
+#     for p in range(NUM_PERIODS):
+#         (stu_course_sec_period[(student, course, section, p)]
+#             for course in student_course_map[student]
+#             for section in range(SECTIONS_PER_COURSE[course])
+#         )
+#         scheduled_courses = [course for ((student, course, section, p), var) in stu_course_sec_period.items() 
+#                             stu_course_sec_period[(student, course, section, p)]
+#                              for course in student_course_map[student]
+#                              for section in range(SECTIONS_PER_COURSE[course])
+#                             ]
+#         model.Add(sum(
+#             weight for weight in course_weight_map[course]
+            
+#         ) <= 1)
 
 # student is in only one section of a course
 for student in students:
@@ -134,17 +154,15 @@ for student in students:
                 )
 
 # seniors must be in one eng course
-# for student in students:
-#     if student in seniors:
-#         engCourses = [course for course in student_course_map[student] if "Eng" in course]
-#         model.Add(sum(
-#             stu_course_sec_period[(student, course, section, p)]
-#             for p in range(NUM_PERIODS)
-#             for course in engCourses
-#             for section in range(SECTIONS_PER_COURSE[course])
-#         ) == 1)
-#         print(student)
-#         print(engCourses)
+for student in students:
+    if student in seniors:
+        engCourses = [course for course in student_course_map[student] if "Eng" in course]
+        model.Add(sum(
+            stu_course_sec_period[(student, course, section, p)]
+            for p in range(NUM_PERIODS)
+            for course in engCourses
+            for section in range(SECTIONS_PER_COURSE[course])
+        ) == 1)
         
 # limits the number of students per course
 # for course in courses:
@@ -158,7 +176,7 @@ for student in students:
 #                 model.Add(sum(enrolled) <= MAX_STUDENTS_PER_SECTION)
 
 
-# students must be in at least 4 courses
+# seniors must be in at least 4 courses
 for student in seniors:
     model.Add(sum(
         stu_course_sec_period[(student, course, section, p)]
@@ -167,13 +185,15 @@ for student in seniors:
             for p in range(NUM_PERIODS)
     ) >= 4)
 
-# solve
-model.minimize(sum(
-    priority_map.get((student, course), 1) 
-    for (student, course, section, period), var in stu_course_sec_period.items()
-    # stu_course_sec_period[(student, course, section, period)]
-    # for (student, course, section, period), var in stu_course_sec_period.items()
-    # if priority_map.get((student, course), 1) == 1
+# solve by minimizing the priority score (where lower is better)
+
+# assigned_courses = {key:var for (key, var) in stu_course_sec_period.items() if var.boolean_value() == 1}
+# print(assigned_courses)
+model.Maximize(sum(
+    (3 if priority_map.get((student, course), 3) == 1 else
+     2 if priority_map.get((student, course), 3) == 2 else
+     1) * student_course_period[(student, course, period)]
+    for (student, course, period) in student_course_period
 ))
 
 solver = cp_model.CpSolver()
