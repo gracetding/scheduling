@@ -1,14 +1,52 @@
 import pandas as pd
 from ortools.sat.python import cp_model
+import numpy as np
+
+        
+# class EnumerateAllSolutions(cp_model.CpSolverSolutionCallback):
+#     def __init__(self, variables: list[cp_model.IntVar]):
+#         cp_model.CpSolverSolutionCallback.__init__(self)
+#         self.__variables = variables #each variable in the group is a list
+#         self.__solution_count = 0
+
+#     def on_solution_callback(self) -> None:
+#         self.__solution_count += 1
+#         for items in self.__variables:
+#             print(f"{v}={self.value(v)}", end=" ")
+#         print()
+
+#     @property
+#     def solution_count(self) -> int:
+#         return self.__solution_count
+
+class SolutionCollector(cp_model.CpSolverSolutionCallback):
+    def __init__(self, variables, students, courses):
+        cp_model.CpSolverSolutionCallback.__init__(self)
+        self.variables = variables
+        self.students = students
+        self.courses = courses
+        self.solutions = []
+        self.solution_count = 0
+
+    def on_solution_callback(self):
+        solution = []
+        for (student, course, section, period), var in self.variables.items():
+            if self.Value(var):
+                solution.append((student, course, section, period + 1))
+        self.solutions.append(solution)
+        self.solution_count += 1
+        if self.solution_count >= 10:
+            self.StopSearch()
+
 
 def run_model(model, priority_num, courses_considered):
     # Load course reqs spreadsheet
-    df = pd.read_excel("py/CourseReqsParsed1.xlsx")  # columns: Course, Student, Category, Priority (int)
+    df = pd.read_excel("CourseReqsParsed1.xlsx")  # columns: Course, Student, Category, Priority (int)
     # Loads available courses
-    secs = pd.read_excel("py/CourseReqsParsed1.xlsx", sheet_name="Classes")
+    secs = pd.read_excel("CourseReqsParsed1.xlsx", sheet_name="Classes")
 
-    seniors = pd.read_excel("py/CourseReqsParsed1.xlsx", sheet_name="Gr12")
-    seniors = seniors['Class'].tolist()[0:90]
+    seniors = pd.read_excel("CourseReqsParsed1.xlsx", sheet_name="Gr12")
+    seniors = seniors['Class'].unique().tolist()
 
     # final_assignments = [] #takes in tuples in the order (Student, Course, Period, Section)
 
@@ -20,9 +58,13 @@ def run_model(model, priority_num, courses_considered):
     SECTIONS_PER_COURSE = {}
     MAX_STUDENTS_PER_SECTION = 20
     required_periods = { # Format: {'CourseName_SectionID': required_period (int)}
-        # 'Multivar Calc_0': 0,
+        'Multivar Calc_0': -1,
+        'Chamber Singers_0': -1,
+
         'US Chorus_0': 7,
-        'US String Orchestra_0': 0,
+        'Swing Choir_0': 7,
+        'US String Orch_0': 0,
+        'US Winds_0': 0,
         # 'US Winds_0': 1
     }
     course_cats = {}
@@ -34,15 +76,17 @@ def run_model(model, priority_num, courses_considered):
         "US Chamber Orch": []
     }
 
-    for _, row in secs.iterrows():
+    for i, row in secs.iterrows():
         course = row['Name']
         sections = row["# Sections"]
         cat = row['Category']
         course_cats[course] = cat
         SECTIONS_PER_COURSE[course] = int(sections)
-        req_pd = row.get('Period', default=None)
-        if req_pd != None:
-            required_periods[f"{course}_0"] = req_pd - 1
+        req_pd = row['Period']
+        
+        if not pd.isnull(row['Period']):
+            required_periods[f"{course}_0"] = int(req_pd) - 1
+            print(course, req_pd)
 
     # assignments, building initial map
     student_course_map = {}
@@ -58,6 +102,7 @@ def run_model(model, priority_num, courses_considered):
                 # print(student_course_map[student])
                 if course in prescheduled_courses.keys():
                     student_course_map[student].remove(course)
+                    prescheduled_courses[course].append(student)
                 course_student_priority[(course, student)] = int(row["Priority"])
 
     # print (course_student_priority)
@@ -151,35 +196,55 @@ def run_model(model, priority_num, courses_considered):
         
     model.maximize(sum(
         stu_course_sec_period.values() ))
+    
+
     solver = cp_model.CpSolver()
+    solution_printer = SolutionCollector(stu_course_sec_period, seniors, courses)
+    solver.parameters.enumerate_all_solutions = True
+    status = solver.solve(model, solution_printer)
 
-    solver.parameters.max_time_in_seconds = 600.0
-    # solver.parameters.enumerate_all_solutions = True
-    status = solver.Solve(model)
-    
-    
-    if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-        assignments = []
-        for (student, course, section, period), var in stu_course_sec_period.items():
-            if solver.Value(var):
-                assignments.append((student, course, section, period+1))  # 1-based index
-
-        result_df = pd.DataFrame(assignments, columns=["Student", "Course", "Section", "Period"])
-        result_df.to_excel("py/final_schedule.xlsx", index=False)
-        print("Schedule created: final_schedule.xlsx")
-        return True
+    # Step 7: Output results
+    if solution_printer.solution_count > 0:
+        for i, assignments in enumerate(solution_printer.solutions):
+            print(f"\nSolution {i + 1}:")
+            result_df = pd.DataFrame(assignments, columns=["Student", "Course", "Section", "Period"])
+            print(status)
+            result_df.to_excel(f"final_schedule_solution_{i + 1}.xlsx", index=False)
+        print(f"\n{solution_printer.solution_count} solution(s) created.")
     else:
         print("No feasible solution found.")
-        return False
+
+
+    # solver = cp_model.CpSolver()
+    
+    # status = solver.Solve(model)
+    # solver.parameters.max_time_in_seconds = 600.0
+    # # Step 7: Output results
+    
+    
+    # # solver.parameters.enumerate_all_solutions = True
+    # # status = solver.Solve(model)
+    
+    
+    # if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+    #     assignments = []
+    #     for (student, course, section, period), var in stu_course_sec_period.items():
+    #         if solver.Value(var):
+    #             assignments.append((student, course, section, period+1))  # 1-based index
+    #     for course, student_list in prescheduled_courses.items():
+    #         for student in student_list:
+    #             key = course + "_0"
+    #             assignments.append((student, course, 0, required_periods[key] + 1))
+    #             print(student, course)
+
+    #     result_df = pd.DataFrame(assignments, columns=["Student", "Course", "Section", "Period"])
+    #     result_df.to_excel("final_schedule.xlsx", index=False)
+    #     print("Schedule created: final_schedule.xlsx")
+    #     return True
+    # else:
+    #     print("No feasible solution found.")
+    #     return False
 
 
 model = cp_model.CpModel()
-
-# run_model(model, 1, ["WL", "MAT"])
 run_model(model, 1, ["MAT", "WL", "SCI", "HIS", "CS", "Arts"])
-# run_model(model, 2, ["WL", "HIS"])
-# run_model(model, 3, ["WL", "HIS"])
-
-
-# Step 7: Output results
-
