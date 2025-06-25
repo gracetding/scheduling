@@ -41,14 +41,12 @@ class SolutionCollector(cp_model.CpSolverSolutionCallback):
 
 def run_model(model, priority_num, courses_considered):
     # Load course reqs spreadsheet
-    df = pd.read_excel("CourseReqsParsed1.xlsx")  # columns: Course, Student, Category, Priority (int)
+    df = pd.read_excel("CourseReqs2525.xlsx")  # columns: Course, Student, Category, Priority (int)
     # Loads available courses
-    secs = pd.read_excel("CourseReqsParsed1.xlsx", sheet_name="Classes")
+    secs = pd.read_excel("CourseReqs2525.xlsx", sheet_name="Classes")
 
-    seniors = pd.read_excel("CourseReqsParsed1.xlsx", sheet_name="Gr12")
-    seniors = seniors['Class'].unique().tolist()
-
-    # final_assignments = [] #takes in tuples in the order (Student, Course, Period, Section)
+    # seniors = pd.read_excel("CourseReqsParsed1.xlsx", sheet_name="Gr12")
+    seniors = df['Student'].unique().tolist()
 
     #indexing data
     courses = []
@@ -65,6 +63,9 @@ def run_model(model, priority_num, courses_considered):
         'Swing Choir_0': 7,
         'US String Orch_0': 0,
         'US Winds_0': 0,
+        #econ is scheduled during specific periods
+        'Adv Econ_0': 1,
+        'Adv Econ_1': 3,
         # 'US Winds_0': 1
     }
     course_cats = {}
@@ -80,13 +81,16 @@ def run_model(model, priority_num, courses_considered):
         course = row['Name']
         sections = row["# Sections"]
         cat = row['Category']
-        course_cats[course] = cat
-        SECTIONS_PER_COURSE[course] = int(sections)
+        
+        if not pd.isnull(row['# Sections']):
+            SECTIONS_PER_COURSE[course] = int(sections)
+            course_cats[course] = cat
         req_pd = row['Period']
         
         if not pd.isnull(row['Period']):
             required_periods[f"{course}_0"] = int(req_pd) - 1
-            print(course, req_pd)
+            # print(course, req_pd)
+    print(SECTIONS_PER_COURSE)
 
     # assignments, building initial map
     student_course_map = {}
@@ -94,17 +98,18 @@ def run_model(model, priority_num, courses_considered):
     for _, row in df.iterrows():
         student = row['Student']
         course = row['Course']
-        if course_cats[course] in courses_considered:
+        # if course_cats[course] in courses_considered:
+        if course in SECTIONS_PER_COURSE.keys() and not "Eng 12" in course:
             if course not in courses:
                 courses.append(course)
-            if int(row['Priority']) <= priority_num or "Eng" in course:
+            if int(row['Priority #']) <= priority_num:
                 student_course_map.setdefault(student, []).append(course) #if the course reqs list exists, appends the course; if not, makes a list & appends course
                 # print(student_course_map[student])
                 if course in prescheduled_courses.keys():
                     student_course_map[student].remove(course)
                     prescheduled_courses[course].append(student)
-                course_student_priority[(course, student)] = int(row["Priority"])
-
+                course_student_priority[(course, student)] = int(row["Priority #"])
+    # print(courses)
     # print (course_student_priority)
     # for student, courses in student_course_map.items():
     #     print(student, courses)
@@ -134,6 +139,8 @@ def run_model(model, priority_num, courses_considered):
 
 
     # CONSTRAINTS
+    # econ is scheduled u2 and u4
+    
     # 1. each section is assigned to only one period
     for course in courses:
         for section in range(SECTIONS_PER_COURSE[course]):
@@ -153,7 +160,25 @@ def run_model(model, priority_num, courses_considered):
             model.Add(sum(course_section_period[(course, section, period)]
                           for section in range(SECTIONS_PER_COURSE[course]))
                           <= 1) 
-
+    #language courses cannot all be nested
+    for period in range(NUM_PERIODS):
+        for lang in ["French", "Chinese", "Latin"]:
+            current_courses = []
+            for course, cat in course_cats.items():
+                if cat == "WL" and lang in course:
+                    current_courses.append(course)
+            # print(current_courses)
+            model.Add(sum(course_section_period[(course, section, period)]
+                          for course in current_courses
+                          for section in range(SECTIONS_PER_COURSE[course])
+                          ) <= 1)
+            
+    for period in range(NUM_PERIODS):
+        wl_courses = [key for key, val in course_cats.items() if val == "WL"]
+        model.Add(sum(course_section_period[(course, section, period)]
+                      for course in wl_courses
+                      for section in range(SECTIONS_PER_COURSE[course])) <= 5)
+            
     #students cannot be in more than one class at once
     for student in student_course_map.keys():
         for p in range(NUM_PERIODS):
