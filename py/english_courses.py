@@ -15,11 +15,11 @@ def read_prev_model(model):
 
 def eng_model(prev_model, model): #where prev model is the old spreadsheet
     # Load course reqs spreadsheet
-    df = pd.read_excel("CourseReqsParsed1.xlsx")  # columns: Course, Student, Category, Priority (int)
+    df = pd.read_excel("CourseReqs2525.xlsx")  # columns: Course, Student, Category, Priority (int)
     # Loads available courses
-    secs = pd.read_excel("CourseReqsParsed1.xlsx", sheet_name="Classes")
-    seniors = pd.read_excel("CourseReqsParsed1.xlsx", sheet_name="Gr12")
-    seniors = seniors['Class'].unique().tolist()
+    secs = pd.read_excel("CourseReqs2525.xlsx", sheet_name="Classes")
+    # seniors = pd.read_excel("CourseReqs2525.xlsx", sheet_name="Gr12")
+    # seniors = seniors['Class'].unique().tolist()
 
     #indexing data
     courses = []
@@ -33,9 +33,10 @@ def eng_model(prev_model, model): #where prev model is the old spreadsheet
     for i, row in secs.iterrows():
         course = row['Name']
         sections = row["# Sections"]
-        if row['Category'] == "ENG":
+        if not pd.isnull(row['Name']) and "Eng 12" in course:
             courses.append(course)
-        SECTIONS_PER_COURSE[course] = int(sections)
+            if not pd.isnull(row['# Sections']):
+                SECTIONS_PER_COURSE[course] = int(sections)
        
 
     # assignments, building initial map
@@ -44,11 +45,11 @@ def eng_model(prev_model, model): #where prev model is the old spreadsheet
     for _, row in df.iterrows():
         student = row['Student']
         course = row['Course']
-        if row['Category'] == "ENG":
+        if "Eng 12" in course:
             if course not in courses:
                 courses.append(course)
             student_course_map.setdefault(student, []).append(course) #if the course reqs list exists, appends the course; if not, makes a list & appends course
-            course_student_priority[(course, student)] = int(row["Priority"])
+            course_student_priority[(course, student)] = int(row["Priority #"])
 
 
     #assigning periods
@@ -88,13 +89,20 @@ def eng_model(prev_model, model): #where prev model is the old spreadsheet
         for section in range(SECTIONS_PER_COURSE[course]):
             model.Add(sum(course_section_period[(course, section, p)] for p in range(NUM_PERIODS)) == 1)
 
+    # salata's classes are scheduled during 2 and 4
+    for period in [1, 3]:
+        model.Add(sum(course_section_period[(course, 0, period)]
+                      for course in ['Eng 12 Digitopia', "Eng 12 War"]) == 1)
+        
     
     # only one section of a course is scheuduled per period
-    for course in courses:
-        for period in range(NUM_PERIODS):
-            model.Add(sum(course_section_period[(course, section, period)]
-                          for section in range(SECTIONS_PER_COURSE[course]))
-                          <= 1) 
+    
+    for period in range(NUM_PERIODS):
+        model.Add(sum(course_section_period[(course, section, period)]
+                    for course in courses
+                    for section in range(SECTIONS_PER_COURSE[course])
+                    )
+                    <= 1) 
 
     #students cannot be in more than one class at once
     for student in student_course_map.keys():
@@ -133,7 +141,7 @@ def eng_model(prev_model, model): #where prev model is the old spreadsheet
                     stu_course_sec_period[(s, course, section, p)]
                     for s in student_course_map.keys() if course in student_course_map[s]
                 ]
-                if enrolled and course != "US Chorus" and course != "US String Orch":
+                if enrolled:
                     model.Add(sum(enrolled) <= MAX_STUDENTS_PER_SECTION)
         
 
@@ -159,20 +167,21 @@ def eng_model(prev_model, model): #where prev model is the old spreadsheet
     
     
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-        
+        name = prev_model.split('.')[0][-1]
+        fname = "25-26 Eng Courses/modified_english_courses" + name + ".xlsx"
         score = 0
         for (student, course, section, period), var in stu_course_sec_period.items():
             # alerts if AALit is not scheduled
             # if course_student_priority[("Eng12 AALit", student)] == 1:
             #     print("hello")
-            if "Eng" in course:
+            if "Eng 12" in course:
                 priority = course_student_priority[(course, student)]
                 if solver.Value(var):
                     assignments.append((student, course, section, period+1, priority))  # 1-based index
                     score += priority
         result_df = pd.DataFrame(assignments, columns=["Student", "Course", "Section", "Period", "Priority"])
-        result_df.to_excel("english_courses.xlsx", index=False)
-        print("Schedule created: english_courses.xlsx")
+        result_df.to_excel(fname, index=False)
+        print("Schedule created: " + fname)
         print("Score: "+ str(score))
 
         return True
@@ -183,11 +192,6 @@ def eng_model(prev_model, model): #where prev model is the old spreadsheet
 
 model = cp_model.CpModel()
 
-eng_model("solutions group 1/final_schedule_solution_1.xlsx", model)
-eng_model("solutions group 1/final_schedule_solution_2.xlsx", model)
-eng_model("solutions group 1/final_schedule_solution_3.xlsx", model)
-eng_model("solutions group 1/final_schedule_solution_4.xlsx", model)
-eng_model("solutions group 1/final_schedule_solution_5.xlsx", model)
-eng_model("solutions group 1/final_schedule_solution_6.xlsx", model)
-eng_model("solutions group 1/final_schedule_solution_7.xlsx", model)
-eng_model("solutions group 1/final_schedule_solution_8.xlsx", model)
+eng_model("25-26 Single Section Courses/final_schedule_solution_4.xlsx", model)
+eng_model("25-26 Single Section Courses/final_schedule_solution_5.xlsx", model)
+eng_model("25-26 Single Section Courses/final_schedule_solution_6.xlsx", model)
